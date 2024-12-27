@@ -6,9 +6,8 @@ use crate::{AuthSpec, Spec, SpecKind};
 
 xflags::xflags! {
     cmd args {
-        /// The bot's login
+        /// The login for the user with the necessary permissions
         required login_name: String
-        repeated --channel name: String
         cmd token {
             /// The oauth access token, if you already have it
             required token: String
@@ -24,7 +23,6 @@ xflags::xflags! {
 
 #[derive(Debug)]
 pub enum Error {
-    NoChannels,
     InvalidAddress(String),
     UrlParse(url::ParseError),
     Io(std::io::Error),
@@ -34,7 +32,6 @@ impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use Error::*;
         match self {
-            NoChannels => write!(f, "No channels were passed. Use --channel <channel name>"),
             InvalidAddress(non_address) => write!(f, "\"{non_address}\" is not a valid address."),
             UrlParse(_) => write!(f, "Url parse error"),
             Io(_) => write!(f, "I/O error"),
@@ -46,8 +43,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use Error::*;
         match self {
-            NoChannels
-            | InvalidAddress(_) => None,
+            InvalidAddress(_) => None,
             UrlParse(e) => Some(e),
             Io(e) => Some(e),
         }
@@ -56,11 +52,6 @@ impl std::error::Error for Error {
 
 impl Args {
     pub fn to_spec(self) -> Result<Spec, Error> {
-        // TODO? bake non-emptyness into field type?
-        if self.channel.is_empty() {
-            return Err(Error::NoChannels);
-        }
-
         let kind = match self.subcommand {
             ArgsCmd::Token(Token{ token }) => {
                 SpecKind::Token(token)
@@ -104,7 +95,6 @@ impl Args {
 
         Ok(Spec {
             login_name: self.login_name,
-            channel_names: self.channel,
             kind,
         })
     }

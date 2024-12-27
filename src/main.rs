@@ -5,6 +5,14 @@ use std::{
     net::{SocketAddr, TcpStream, ToSocketAddrs},
     time::{Duration}
 };
+use twitch_types::{
+    points::RewardId,
+    UserId
+};
+use twitch_oauth2::{
+    tokens::UserToken,
+    types::AccessToken,
+};
 use twitch_api::{
     HelixClient,
     HttpClient,
@@ -12,11 +20,6 @@ use twitch_api::{
         UpdateCustomRewardBody,
         UpdateCustomRewardRequest
     },
-};
-use twitch_oauth2::tokens::UserToken;
-use twitch_types::{
-    points::RewardId,
-    UserId
 };
 use url::Url;
 
@@ -36,7 +39,6 @@ pub enum SpecKind {
 }
 
 pub struct Spec {
-    pub channel_names: Vec<String>,
     pub login_name: String,
     pub kind: SpecKind,
 }
@@ -54,28 +56,27 @@ pub async fn main() -> Res<()> {
     let args = flags::Args::from_env()?;
 
     let Spec {
-        channel_names,
         login_name,
         kind,
     } = args.to_spec()?;
 
     tracing_subscriber::fmt::init();
 
-    let oauth_token = match kind {
+    let access_token = match kind {
         SpecKind::Auth(auth_spec) => authorize(auth_spec)?,
-        SpecKind::Token(token) => token,
+        SpecKind::Token(token) => AccessToken::new(token),
     };
 
     tracing::info!("Debug mode: {DEBUG_MODE}");
 
-    let agent: ureq::Agent = todo!();
+    let agent: ureq::Agent = ureq::agent();
 
     let client: HelixClient<ureq::Agent> = HelixClient::with_client(agent);
 
-    let token = todo!(); //oauth_token
+    let user_token = UserToken::from_token(&client, access_token).await?;
 
     // TODO allow specifying calls somehow. Parse JSON from file?
-    perform_calls(&client, ApiCallsSpec { calls: vec![] }, &token).await
+    perform_calls(&client, ApiCallsSpec { calls: vec![] }, &user_token).await
 }
 
 fn authorize(AuthSpec {
@@ -83,7 +84,7 @@ fn authorize(AuthSpec {
     addr_string,
     app_id,
     app_secret,
-}: AuthSpec) -> Res<String> {
+}: AuthSpec) -> Res<AccessToken> {
 
     use rand::{Rng, thread_rng};
     use rouille::{Server, Response};
@@ -250,7 +251,7 @@ You may now close this page.
     // TODO? use refresh token after a while?
     tracing::info!("refresh_token: {refresh_token}");
 
-    Ok(access_token)
+    Ok(AccessToken::new(access_token))
 }
 
 struct UpdateSpec<'update_body> {
