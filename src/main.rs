@@ -148,10 +148,10 @@ fn authorize(AuthSpec {
     }
     h1{line-height:1.2}
     </style>
-    <title>TTTT OAuth</title>
+    <title>TART OAuth</title>
 </head>
 <body>
-    <h1>Thanks for Authenticating with TTTT OAuth!</h1>
+    <h1>Thanks for Authenticating with TART OAuth!</h1>
 You may now close this page.
 </body>
 </html>"#;
