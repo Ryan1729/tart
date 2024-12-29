@@ -4,7 +4,7 @@ use std::net::{SocketAddr, ToSocketAddrs};
 use std::path::PathBuf;
 use url::Url;
 
-use crate::{AuthSpec, Spec, SpecKind};
+use crate::{AuthSpec, Spec, SpecKind, TokenSpec};
 
 xflags::xflags! {
     cmd args {
@@ -68,8 +68,8 @@ impl std::error::Error for Error {
 
 impl Args {
     pub fn to_spec(self) -> Result<Spec, Error> {
-        let kind = if let Some(token) = self.token {
-            SpecKind::Token(token)
+        let token_spec = if let Some(token) = self.token {
+            TokenSpec::Token(token)
         } else {
             let Some(app_id) = self.app_id else {
                 return Err(Error::AppIdMissing)
@@ -101,7 +101,7 @@ impl Args {
                 return Err(Error::InvalidAddress(address))
             };
     
-            SpecKind::Auth(
+            TokenSpec::Auth(
                 AuthSpec {
                     addr,
                     addr_string: address,
@@ -111,19 +111,20 @@ impl Args {
             )
         };
 
-        match self.subcommand {
+        let kind = match self.subcommand {
             ArgsCmd::Get_rewards(Get_rewards{}) => {
-                
+                SpecKind::GetRewards
             }
             ArgsCmd::Modify_rewards(Modify_rewards {
                 lua
             }) => {
-                dbg!(lua);
+                SpecKind::ModifyRewards(lua)
             }
         };
 
         Ok(Spec {
             login_name: self.login_name,
+            token_spec,
             kind,
         })
     }

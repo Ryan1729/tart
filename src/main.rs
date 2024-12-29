@@ -3,6 +3,7 @@
 
 use std::{
     net::{SocketAddr, TcpStream, ToSocketAddrs},
+    path::PathBuf,
     time::{Duration}
 };
 use twitch_types::{
@@ -16,9 +17,15 @@ use twitch_oauth2::{
 use twitch_api::{
     HelixClient,
     HttpClient,
-    helix::points::update_custom_reward::{
-        UpdateCustomRewardBody,
-        UpdateCustomRewardRequest
+    helix::points::{
+        get_custom_reward::{
+            GetCustomRewardRequest,
+            CustomReward,
+        },
+        update_custom_reward::{
+            UpdateCustomRewardBody,
+            UpdateCustomRewardRequest,
+        },
     },
 };
 use url::Url;
@@ -34,6 +41,11 @@ const SLEEP_DURATION: std::time::Duration = std::time::Duration::from_millis(16)
 pub type Token = String;
 
 pub enum SpecKind {
+    GetRewards,
+    ModifyRewards(PathBuf)
+}
+
+pub enum TokenSpec {
     Token(Token),
     Auth(AuthSpec)
 }
@@ -41,6 +53,7 @@ pub enum SpecKind {
 pub struct Spec {
     pub login_name: String,
     pub kind: SpecKind,
+    pub token_spec: TokenSpec,
 }
 
 pub struct AuthSpec {
@@ -57,14 +70,15 @@ pub async fn main() -> Res<()> {
 
     let Spec {
         login_name,
+        token_spec,
         kind,
     } = args.to_spec()?;
 
     tracing_subscriber::fmt::init();
 
-    let access_token = match kind {
-        SpecKind::Auth(auth_spec) => authorize(auth_spec)?,
-        SpecKind::Token(token) => AccessToken::new(token),
+    let access_token = match token_spec {
+        TokenSpec::Auth(auth_spec) => authorize(auth_spec)?,
+        TokenSpec::Token(token) => AccessToken::new(token),
     };
 
     tracing::info!("Debug mode: {DEBUG_MODE}");
@@ -75,8 +89,23 @@ pub async fn main() -> Res<()> {
 
     let user_token = UserToken::from_token(&client, access_token).await?;
 
-    // TODO allow specifying calls somehow. Parse JSON from file?
-    perform_calls(&client, ApiCallsSpec { calls: vec![] }, &user_token).await
+    let calls = match kind {
+        SpecKind::GetRewards => {
+            vec![ApiCallSpec::GetRewards(GetRewardsSpec { 
+                 //TODO? Allow specifying a different id here?
+                broadcaster_id: user_token.user_id.clone(),
+            })]
+        },
+        SpecKind::ModifyRewards(lua) => {
+            dbg!(lua);
+
+            // TODO run lua code to specify calls
+            // TODO? additional options like parse JSON from file?
+            vec![]
+        },
+    };
+
+    perform_calls(&client, ApiCallsSpec { calls }, &user_token).await
 }
 
 fn authorize(AuthSpec {
@@ -192,7 +221,7 @@ You may now close this page.
         .append_pair("client_id", &app_id)
         .append_pair("redirect_uri", &addr_string)
         .append_pair("response_type", "code")
-        .append_pair("scope", "chat:read chat:edit")
+        .append_pair("scope", "channel:manage:redemptions")
         .append_pair("force_verify", "true")
         .append_pair("state", &auth_state_key_string)
         ;
@@ -254,6 +283,10 @@ You may now close this page.
     Ok(AccessToken::new(access_token))
 }
 
+struct GetRewardsSpec {
+    broadcaster_id: UserId,
+}
+
 struct UpdateSpec<'update_body> {
     broadcaster_id: UserId,
     reward_id: RewardId,
@@ -261,6 +294,7 @@ struct UpdateSpec<'update_body> {
 }
 
 enum ApiCallSpec<'update_body> {
+    GetRewards(GetRewardsSpec),
     Update(UpdateSpec<'update_body>)
 }
 use ApiCallSpec::*;
@@ -269,7 +303,6 @@ struct ApiCallsSpec<'update_body> {
     calls: Vec<ApiCallSpec<'update_body>>,
 }
 
-
 async fn perform_calls<'update_body, Client: HttpClient>(
     client: &HelixClient<'_, Client>, 
     ApiCallsSpec {calls}: ApiCallsSpec<'update_body>, 
@@ -277,6 +310,11 @@ async fn perform_calls<'update_body, Client: HttpClient>(
 ) -> Res<()> {
     for call in calls {
         match call {
+            GetRewards(GetRewardsSpec { broadcaster_id }) => {
+                let request = GetCustomRewardRequest::broadcaster_id(broadcaster_id);
+                let response: Vec<CustomReward> = client.req_get(request, token).await?.data;
+                dbg!(response);
+            }
             Update(update_spec) => {
                 let request = UpdateCustomRewardRequest::new(
                     update_spec.broadcaster_id,
@@ -288,7 +326,6 @@ async fn perform_calls<'update_body, Client: HttpClient>(
                 client.req_patch(request, body, token).await?;
             }
         }
-        
     }
     
     Ok(())
