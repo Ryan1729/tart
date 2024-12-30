@@ -96,16 +96,87 @@ pub async fn main() -> Res<()> {
                 broadcaster_id: user_token.user_id.clone(),
             })]
         },
-        SpecKind::ModifyRewards(lua) => {
-            dbg!(lua);
+        SpecKind::ModifyRewards(lua_path) => {
+            use mlua::{Lua, Table}; 
+            dbg!(&lua_path);
 
-            // TODO run lua code to specify calls
+            let mut calls = Vec::with_capacity(50 /* max allowed apparently */);
+
+            let mut lua_state = Lua::new();
+
+            let expression: Table = lua_state.load(lua_path).eval()?;
+
+            dbg!(expression);
+            // TODO convert lua table with the right shape to an `UpdateSpec`, defaulting the broadcaster_id
+            // TODO convert lua array (table) with the right shape to multiple `UpdateSpec`s
+            
+            // For reference
+            //struct UpdateSpec<'update_body> {
+                //broadcaster_id: UserId,
+                //reward_id: RewardId,
+                //body: UpdateCustomRewardBody<'update_body>,
+            //}
+            //
+            //enum ApiCallSpec<'update_body> {
+                //GetRewards(GetRewardsSpec),
+                //Update(UpdateSpec<'update_body>)
+            //}
+
+
             // TODO? additional options like parse JSON from file?
-            vec![]
+            calls
         },
     };
 
     perform_calls(&client, ApiCallsSpec { calls }, &user_token).await
+}
+
+struct GetRewardsSpec {
+    broadcaster_id: UserId,
+}
+
+struct UpdateSpec<'update_body> {
+    broadcaster_id: UserId,
+    reward_id: RewardId,
+    body: UpdateCustomRewardBody<'update_body>,
+}
+
+enum ApiCallSpec<'update_body> {
+    GetRewards(GetRewardsSpec),
+    Update(UpdateSpec<'update_body>)
+}
+use ApiCallSpec::*;
+
+struct ApiCallsSpec<'update_body> {
+    calls: Vec<ApiCallSpec<'update_body>>,
+}
+
+async fn perform_calls<'update_body, Client: HttpClient>(
+    client: &HelixClient<'_, Client>, 
+    ApiCallsSpec {calls}: ApiCallsSpec<'update_body>, 
+    token: &UserToken
+) -> Res<()> {
+    for call in calls {
+        match call {
+            GetRewards(GetRewardsSpec { broadcaster_id }) => {
+                let request = GetCustomRewardRequest::broadcaster_id(broadcaster_id);
+                let response: Vec<CustomReward> = client.req_get(request, token).await?.data;
+                dbg!(response);
+            }
+            Update(update_spec) => {
+                let request = UpdateCustomRewardRequest::new(
+                    update_spec.broadcaster_id,
+                    update_spec.reward_id,
+                );
+
+                let body = update_spec.body;
+
+                client.req_patch(request, body, token).await?;
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 fn authorize(AuthSpec {
@@ -281,52 +352,4 @@ You may now close this page.
     tracing::info!("refresh_token: {refresh_token}");
 
     Ok(AccessToken::new(access_token))
-}
-
-struct GetRewardsSpec {
-    broadcaster_id: UserId,
-}
-
-struct UpdateSpec<'update_body> {
-    broadcaster_id: UserId,
-    reward_id: RewardId,
-    body: UpdateCustomRewardBody<'update_body>,
-}
-
-enum ApiCallSpec<'update_body> {
-    GetRewards(GetRewardsSpec),
-    Update(UpdateSpec<'update_body>)
-}
-use ApiCallSpec::*;
-
-struct ApiCallsSpec<'update_body> {
-    calls: Vec<ApiCallSpec<'update_body>>,
-}
-
-async fn perform_calls<'update_body, Client: HttpClient>(
-    client: &HelixClient<'_, Client>, 
-    ApiCallsSpec {calls}: ApiCallsSpec<'update_body>, 
-    token: &UserToken
-) -> Res<()> {
-    for call in calls {
-        match call {
-            GetRewards(GetRewardsSpec { broadcaster_id }) => {
-                let request = GetCustomRewardRequest::broadcaster_id(broadcaster_id);
-                let response: Vec<CustomReward> = client.req_get(request, token).await?.data;
-                dbg!(response);
-            }
-            Update(update_spec) => {
-                let request = UpdateCustomRewardRequest::new(
-                    update_spec.broadcaster_id,
-                    update_spec.reward_id,
-                );
-
-                let body = update_spec.body;
-
-                client.req_patch(request, body, token).await?;
-            }
-        }
-    }
-    
-    Ok(())
 }
