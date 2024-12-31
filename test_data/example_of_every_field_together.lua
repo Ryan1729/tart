@@ -1,0 +1,20 @@
+{
+    broadcaster_id = "000000000",
+    reward_id = "00000000-0000-0000-0000-000000000000",
+    body = {
+        title = "a title",
+        prompt = "a prompt",
+        cost = 42,
+        background_color = "#888888",
+        is_enabled = true,
+        is_user_input_required = false,
+        is_max_per_stream_enabled = false,
+        max_per_stream = 24,
+        is_max_per_user_per_stream_enabled = true,
+        max_per_user_per_stream = 2,
+        is_global_cooldown_enabled = true,
+        global_cooldown_seconds = 300,
+        is_paused = false,
+        should_redemptions_skip_request_queue = false,
+    },
+}

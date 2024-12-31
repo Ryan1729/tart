@@ -1,10 +1,9 @@
 #![deny(unused_must_use)]
 
-
+use mlua::{FromLua, IntoLua, Lua, Table};
 use std::{
-    net::{SocketAddr, TcpStream, ToSocketAddrs},
+    net::{SocketAddr},
     path::PathBuf,
-    time::{Duration}
 };
 use twitch_types::{
     points::RewardId,
@@ -69,7 +68,7 @@ pub async fn main() -> Res<()> {
     let args = flags::Args::from_env()?;
 
     let Spec {
-        login_name,
+        login_name: _,
         token_spec,
         kind,
     } = args.to_spec()?;
@@ -89,38 +88,46 @@ pub async fn main() -> Res<()> {
 
     let user_token = UserToken::from_token(&client, access_token).await?;
 
+    //TODO? Allow specifying a different id here?
+    let default_broadcaster_id = user_token.user_id.clone();
+
     let calls = match kind {
         SpecKind::GetRewards => {
-            vec![ApiCallSpec::GetRewards(GetRewardsSpec { 
-                 //TODO? Allow specifying a different id here?
-                broadcaster_id: user_token.user_id.clone(),
+            vec![ApiCallSpec::GetRewards(GetRewardsSpec {
+                broadcaster_id: default_broadcaster_id,
             })]
         },
         SpecKind::ModifyRewards(lua_path) => {
-            use mlua::{Lua, Table}; 
-            dbg!(&lua_path);
+            tracing::info!("lua path: {}", lua_path.display());
 
             let mut calls = Vec::with_capacity(50 /* max allowed apparently */);
 
-            let mut lua_state = Lua::new();
+            let lua_state = Lua::new();
 
             let expression: Table = lua_state.load(lua_path).eval()?;
 
-            dbg!(expression);
+            tracing::info!("lua expression: {:#?}", &expression);
+
+            let reward_id_res = expression.get::<String>("reward_id").map(From::from);
+            let body_res = expression.get::<Table>("body").and_then(table_to_body);
+
+            if let (Ok(reward_id), Ok(body)) = (reward_id_res, body_res) {
+                let broadcaster_id =
+                    expression.get::<String>("broadcaster_id")
+                    .map(From::from)
+                    .unwrap_or(default_broadcaster_id);
+
+                calls.push(ApiCallSpec::Update(UpdateSpec {
+                    broadcaster_id,
+                    reward_id,
+                    body,
+                }));
+            } else {
+                // TODO convert lua array (table) with the right shape to multiple `UpdateSpec`s
+            }
             // TODO convert lua table with the right shape to an `UpdateSpec`, defaulting the broadcaster_id
-            // TODO convert lua array (table) with the right shape to multiple `UpdateSpec`s
-            
-            // For reference
-            //struct UpdateSpec<'update_body> {
-                //broadcaster_id: UserId,
-                //reward_id: RewardId,
-                //body: UpdateCustomRewardBody<'update_body>,
-            //}
-            //
-            //enum ApiCallSpec<'update_body> {
-                //GetRewards(GetRewardsSpec),
-                //Update(UpdateSpec<'update_body>)
-            //}
+
+
 
 
             // TODO? additional options like parse JSON from file?
@@ -129,6 +136,72 @@ pub async fn main() -> Res<()> {
     };
 
     perform_calls(&client, ApiCallsSpec { calls }, &user_token).await
+}
+
+fn table_to_body<'update_body>(table: Table) -> Result<UpdateCustomRewardBody<'update_body>, mlua::Error> {
+    let mut output = UpdateCustomRewardBody::default();
+
+    let table = &table;
+
+    if let Some(title) = get_if_present::<String>(&table, "title") {
+        output.title = Some(title.into());
+    }
+    if let Some(prompt) = get_if_present::<String>(&table, "prompt") {
+        output.prompt = Some(prompt.into());
+    }
+    if let Some(cost) = get_if_present::<usize>(&table, "cost") {
+        output.cost = Some(cost);
+    }
+    if let Some(background_color) = get_if_present::<String>(&table, "background_color") {
+        output.background_color = Some(background_color.into());
+    }
+    if let Some(is_enabled) = get_if_present::<bool>(&table, "is_enabled") {
+        output.is_enabled = Some(is_enabled);
+    }
+    if let Some(is_user_input_required) = get_if_present::<bool>(&table, "is_user_input_required") {
+        output.is_user_input_required = Some(is_user_input_required);
+    }
+    if let Some(is_max_per_stream_enabled) = get_if_present::<bool>(&table, "is_max_per_stream_enabled") {
+        output.is_max_per_stream_enabled = Some(is_max_per_stream_enabled);
+    }
+    if let Some(max_per_stream) = get_if_present::<usize>(&table, "max_per_stream") {
+        output.max_per_stream = Some(max_per_stream);
+    }
+    if let Some(is_max_per_user_per_stream_enabled) = get_if_present::<bool>(&table, "is_max_per_user_per_stream_enabled") {
+        output.is_max_per_user_per_stream_enabled = Some(is_max_per_user_per_stream_enabled);
+    }
+    if let Some(max_per_user_per_stream) = get_if_present::<usize>(&table, "max_per_user_per_stream") {
+        output.max_per_user_per_stream = Some(max_per_user_per_stream);
+    }
+    if let Some(is_global_cooldown_enabled) = get_if_present::<bool>(&table, "is_global_cooldown_enabled") {
+        output.is_global_cooldown_enabled = Some(is_global_cooldown_enabled);
+    }
+    if let Some(global_cooldown_seconds) = get_if_present::<usize>(&table, "global_cooldown_seconds") {
+        output.global_cooldown_seconds = Some(global_cooldown_seconds);
+    }
+    if let Some(is_paused) = get_if_present::<bool>(&table, "is_paused") {
+        output.is_paused = Some(is_paused);
+    }
+    if let Some(should_redemptions_skip_request_queue) = get_if_present::<bool>(&table, "should_redemptions_skip_request_queue") {
+        output.should_redemptions_skip_request_queue = Some(should_redemptions_skip_request_queue);
+    }
+
+    Ok(output)
+}
+
+/// Table::get but returning `None` when the value is `nil`.
+fn get_if_present<V: FromLua>(table: &Table, key: impl IntoLua + Clone) -> Option<V> {
+    use mlua::Value;
+    match table.get::<Value>(key.clone()) {
+        Ok(Value::Nil) | Err(_) => {
+            None
+        }
+        Ok(_) => {
+            // Call get again because that has access to the `Lua` value
+            // needed to call `FromLua::from_lua`.
+            table.get::<V>(key).ok()
+        }
+    }
 }
 
 struct GetRewardsSpec {
@@ -152,8 +225,8 @@ struct ApiCallsSpec<'update_body> {
 }
 
 async fn perform_calls<'update_body, Client: HttpClient>(
-    client: &HelixClient<'_, Client>, 
-    ApiCallsSpec {calls}: ApiCallsSpec<'update_body>, 
+    client: &HelixClient<'_, Client>,
+    ApiCallsSpec {calls}: ApiCallsSpec<'update_body>,
     token: &UserToken
 ) -> Res<()> {
     for call in calls {
@@ -175,7 +248,7 @@ async fn perform_calls<'update_body, Client: HttpClient>(
             }
         }
     }
-    
+
     Ok(())
 }
 
