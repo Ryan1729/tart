@@ -8,6 +8,9 @@ use crate::{AuthSpec, Spec, SpecKind, TokenSpec};
 
 xflags::xflags! {
     cmd args {
+        /// Show the version of this program and exit
+        optional --version
+
         /// The login for the user with the necessary permissions
         required login_name: String
 
@@ -30,6 +33,8 @@ xflags::xflags! {
 
 #[derive(Debug)]
 pub enum Error {
+    // Not technically an error, but a quick termination condition, so close enough
+    ShowVersion,
     AppIdMissing,
     AppSecretMissing,
     AddressMissing,
@@ -42,6 +47,7 @@ impl core::fmt::Display for Error {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use Error::*;
         match self {
+            ShowVersion => write!(f, "{}", env!("CARGO_PKG_VERSION")),
             AppIdMissing => write!(f, "--app_id flag missing"),
             AppSecretMissing => write!(f, "--app_secret flag missing"),
             AddressMissing => write!(f, "--address flag missing"),
@@ -56,7 +62,8 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         use Error::*;
         match self {
-            AppIdMissing
+            ShowVersion
+            | AppIdMissing
             | AppSecretMissing
             | AddressMissing
             | InvalidAddress(_) => None,
@@ -68,6 +75,10 @@ impl std::error::Error for Error {
 
 impl Args {
     pub fn to_spec(self) -> Result<Spec, Error> {
+        if self.version {
+            return Err(Error::ShowVersion)
+        }
+
         let token_spec = if let Some(token) = self.token {
             TokenSpec::Token(token)
         } else {

@@ -63,8 +63,30 @@ pub struct AuthSpec {
     app_secret: String,
 }
 
-#[tokio::main]
-pub async fn main() -> Res<()> {
+struct ExitRes(pub Res<()>);
+
+impl std::process::Termination for ExitRes {
+    fn report(self) -> std::process::ExitCode {
+        match self.0 {
+            Ok(val) => val.report(),
+            Err(err) => {
+                eprintln!("{err}");
+                std::process::ExitCode::FAILURE
+            }
+        }
+    }
+}
+
+
+fn main() -> ExitRes {
+    ExitRes(tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(inner_main()))
+}
+
+async fn inner_main() -> Res<()> {
     let args = flags::Args::from_env()?;
 
     let Spec {
