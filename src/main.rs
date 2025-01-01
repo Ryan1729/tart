@@ -127,13 +127,12 @@ pub async fn main() -> Res<()> {
             }
             // TODO convert lua table with the right shape to an `UpdateSpec`, defaulting the broadcaster_id
 
-
-
-
             // TODO? additional options like parse JSON from file?
             calls
         },
     };
+
+    tracing::info!("Will make {} API call{}", calls.len(), if calls.len() == 1 { "" } else { "s" });
 
     perform_calls(&client, ApiCallsSpec { calls }, &user_token).await
 }
@@ -234,7 +233,8 @@ async fn perform_calls<'update_body, Client: HttpClient>(
             GetRewards(GetRewardsSpec { broadcaster_id }) => {
                 let request = GetCustomRewardRequest::broadcaster_id(broadcaster_id);
                 let response: Vec<CustomReward> = client.req_get(request, token).await?.data;
-                dbg!(response);
+
+                tracing::info!("get reward response: {response:#?}");
             }
             Update(update_spec) => {
                 let request = UpdateCustomRewardRequest::new(
