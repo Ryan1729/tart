@@ -89,7 +89,7 @@ pub async fn main() -> Res<()> {
     let user_token = UserToken::from_token(&client, access_token).await?;
 
     //TODO? Allow specifying a different id here?
-    let default_broadcaster_id = user_token.user_id.clone();
+    let default_broadcaster_id: UserId = user_token.user_id.clone();
 
     let calls = match kind {
         SpecKind::GetRewards => {
@@ -108,24 +108,16 @@ pub async fn main() -> Res<()> {
 
             tracing::info!("lua expression: {:#?}", &expression);
 
-            let reward_id_res = expression.get::<String>("reward_id").map(From::from);
-            let body_res = expression.get::<Table>("body").and_then(table_to_body);
-
-            if let (Ok(reward_id), Ok(body)) = (reward_id_res, body_res) {
-                let broadcaster_id =
-                    expression.get::<String>("broadcaster_id")
-                    .map(From::from)
-                    .unwrap_or(default_broadcaster_id);
-
-                calls.push(ApiCallSpec::Update(UpdateSpec {
-                    broadcaster_id,
-                    reward_id,
-                    body,
-                }));
+            if let Ok(update_spec) = table_to_update_spec(&expression, default_broadcaster_id.clone()) {
+                calls.push(ApiCallSpec::Update(update_spec));
             } else {
                 // TODO convert lua array (table) with the right shape to multiple `UpdateSpec`s
+                for element in expression.sequence_values::<Table>() {
+                    // Do `?` because if we are iterating through something and one of the elements
+                    // aren't what we expect, then something is likely very wrong.
+                    calls.push(ApiCallSpec::Update(table_to_update_spec(&(element?), default_broadcaster_id.clone())?));
+                }
             }
-            // TODO convert lua table with the right shape to an `UpdateSpec`, defaulting the broadcaster_id
 
             // TODO? additional options like parse JSON from file?
             calls
@@ -135,6 +127,32 @@ pub async fn main() -> Res<()> {
     tracing::info!("Will make {} API call{}", calls.len(), if calls.len() == 1 { "" } else { "s" });
 
     perform_calls(&client, ApiCallsSpec { calls }, &user_token).await
+}
+
+fn table_to_update_spec<'update_body>(
+    table: &Table,
+    default_broadcaster_id: UserId
+) -> Result<UpdateSpec<'update_body>, mlua::Error> {
+    let reward_id_res = table.get::<String>("reward_id").map(From::from);
+    let body_res = table.get::<Table>("body").and_then(table_to_body);
+
+    match (reward_id_res, body_res) {
+        (Ok(reward_id), Ok(body)) => {
+            let broadcaster_id =
+                table.get::<String>("broadcaster_id")
+                .map(From::from)
+                .unwrap_or(default_broadcaster_id);
+
+            Ok(UpdateSpec {
+                broadcaster_id,
+                reward_id,
+                body,
+            })
+        },
+        (Err(e), _)|(_, Err(e)) => {
+            Err(e)
+        },
+    }
 }
 
 fn table_to_body<'update_body>(table: Table) -> Result<UpdateCustomRewardBody<'update_body>, mlua::Error> {
